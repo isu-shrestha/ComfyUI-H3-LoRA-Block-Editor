@@ -19,10 +19,34 @@ editing required:
 Outputs the patched `MODEL` plus a `report` string showing exactly what landed. Anything
 resolving to `0` is skipped entirely — no patch is registered, so it costs nothing.
 
-**H3 LoRA Block Spec** (`loaders/h3`) — optional. Only reach for it when a group of ten is
-too coarse and you want individual blocks. Connect its output to the loader's
-`block_weights` input; its rules apply **on top of** the sliders, so you can leave the
-loader set the way you like and override a single block.
+**H3 LoRA Block Spec** (`loaders/h3`) — optional. Reach for it when a group of ten is too
+coarse. Connect its output to the loader's `block_weights` input; its rules apply **on top
+of** the sliders, so you can leave the loader set the way you like and override a single
+block.
+
+It carries a paint grid — four rows (the weight matrices inside every block) by fifty
+columns (the blocks):
+
+```
+        0    10    20    30    40   49
+ all
+ qkv  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░
+ out  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░
+ fc1  ░░░░░░░░░░▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+ fc2  ░░░░░░░░░░▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+```
+
+- **click a cell** to toggle that block's matrix on or off
+- **drag across cells** to paint a range — the first cell decides whether you're setting
+  or clearing
+- **click a row label** (`qkv`, `out`, `fc1`, `fc2`) to flip that whole row
+- **click `all`** to flip everything
+
+The grid is on/off only. For fractional weights, type them in the text box below — it is
+appended after the grid, so it overrides it. Cells holding a fractional value from the
+text box render dimmed rather than solid.
+
+An untouched grid emits no rules at all, so it never silently overrides the loader.
 
 The loader's `block_weights` is a socket rather than a text box on purpose — a multiline
 widget claims the node's whole vertical space in ComfyUI, and the common case doesn't

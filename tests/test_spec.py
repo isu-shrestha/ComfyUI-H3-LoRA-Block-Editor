@@ -81,14 +81,59 @@ print("ok  widget spec, all layers")
 
 # the spec node validates and passes through
 spec_node = h3.H3LoraBlockSpec()
-assert spec_node.build("0-9: 0.5")[0] == "0-9: 0.5"
-assert spec_node.build("")[0] == ""
+assert spec_node.build("", "0-9: 0.5")[0] == "0-9: 0.5"
+assert spec_node.build("", "")[0] == ""
 try:
-    spec_node.build("0-9: nope")
+    spec_node.build("", "0-9: nope")
 except ValueError as e:
     print("ok  spec node rejects bad input ->", e)
 else:
     failures.append("spec node should reject bad input")
+
+# --- the grid compiler -----------------------------------------------------------
+import json as _json
+
+
+def grid(**rows):
+    state = {r: [1] * 50 for r in h3.GRID_ROWS}
+    for name, values in rows.items():
+        state[name] = values
+    return _json.dumps(state)
+
+
+def check_grid(label, state, expected):
+    got = h3.spec_from_grid(state)
+    ok = got == expected
+    print("{} {:<34} {}".format("ok " if ok else "FAIL", label, repr(got)))
+    if not ok:
+        failures.append("{}: expected {!r}".format(label, expected))
+
+
+check_grid("untouched grid emits nothing", grid(), "")
+check_grid("empty state emits nothing", "", "")
+check_grid("malformed json emits nothing", "{not json", "")
+check_grid("one cell off", grid(qkv=[0] + [1] * 49), "0.qkv: 0")
+check_grid("a run collapses to a range", grid(fc1=[0] * 10 + [1] * 40), "0-9.fc1: 0")
+check_grid("whole row off", grid(out=[0] * 50), "0-49.out: 0")
+check_grid("two runs in one row",
+           grid(fc2=[0] * 5 + [1] * 40 + [0] * 5), "0-4.fc2: 0\n45-49.fc2: 0")
+check_grid("fractional values survive", grid(qkv=[0.5] * 50), "0-49.qkv: 0.5")
+check_grid("multiple rows keep row order",
+           grid(qkv=[0] * 50, fc1=[0] * 50), "0-49.qkv: 0\n0-49.fc1: 0")
+
+# grid output must be parseable and resolve as expected
+rules = h3.parse_spec(h3.spec_from_grid(grid(fc1=[0] * 10 + [1] * 40, fc2=[0] * 10 + [1] * 40)))
+assert h3.resolve_weight(rules, "block", 5, "mlp.fc1") == 0.0
+assert h3.resolve_weight(rules, "block", 5, "attn.qkv_proj") == 1.0
+assert h3.resolve_weight(rules, "block", 20, "mlp.fc1") == 1.0
+print("ok  grid output parses and resolves")
+
+# text overrides the grid, because it is appended after
+combined = spec_node.build(grid(qkv=[0] * 50), "0-9.qkv: 1.0")[0]
+rules = h3.parse_spec(combined)
+assert h3.resolve_weight(rules, "block", 5, "attn.qkv_proj") == 1.0
+assert h3.resolve_weight(rules, "block", 30, "attn.qkv_proj") == 0.0
+print("ok  text box overrides the grid")
 
 # error handling
 for bad, why in [("0-9 1.0", "missing colon"), ("0-9: abc", "bad number"), ("0-9.wat: 1", "bad layer")]:

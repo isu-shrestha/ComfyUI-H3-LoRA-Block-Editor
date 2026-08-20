@@ -13,6 +13,7 @@ applying a per-block strength is just a matter of splitting the patch dict by
 block and calling add_patches() once per distinct strength.
 """
 
+import json
 import logging
 import re
 
@@ -292,19 +293,61 @@ class H3LoraBlockLoader:
         return (patched, report)
 
 
+GRID_ROWS = ("qkv", "out", "fc1", "fc2")
+NUM_BLOCKS = 50
+
+
+def spec_from_grid(grid_state):
+    """Compile the grid widget's JSON state into spec lines.
+
+    State is {"qkv": [50 floats], "out": [...], "fc1": [...], "fc2": [...]}.
+    Only values that differ from 1.0 emit a rule, and runs of equal values
+    collapse into ranges, so an untouched grid produces nothing at all.
+    """
+    if not grid_state or not grid_state.strip():
+        return ""
+    try:
+        data = json.loads(grid_state)
+    except ValueError:
+        logging.warning("H3 LoRA Block Spec: grid state is not valid JSON, ignoring it")
+        return ""
+    if not isinstance(data, dict):
+        return ""
+
+    lines = []
+    for row in GRID_ROWS:
+        values = data.get(row)
+        if not isinstance(values, list) or not values:
+            continue
+        start = 0
+        for i in range(1, len(values) + 1):
+            if i == len(values) or values[i] != values[start]:
+                value = values[start]
+                if isinstance(value, (int, float)) and value != 1.0:
+                    lo, hi = start, i - 1
+                    label = str(lo) if lo == hi else "{}-{}".format(lo, hi)
+                    lines.append("{}.{}: {:.4g}".format(label, row, value))
+                start = i
+    return "\n".join(lines)
+
+
 class H3LoraBlockSpec:
-    """Free-form spec for per-block control, when the loader's groups are too coarse."""
+    """Per-block control: a grid you paint, plus free-form text for the fine print."""
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
+                "grid": ("STRING", {"default": "",
+                                    "tooltip": "Painted by the grid widget. Left as-is it emits "
+                                               "nothing and the loader's sliders govern."}),
                 "spec": ("STRING", {"multiline": True, "default": "",
                                     "placeholder": SPEC_PLACEHOLDER,
                                     "tooltip": "Selectors: '*', '0-9', '12', 'refiner', with an "
                                                "optional layer suffix ('.attn', '.mlp', '.qkv', "
                                                "'.out', '.fc1', '.fc2'). Later lines override "
-                                               "earlier ones. '#' starts a comment."}),
+                                               "earlier ones, including the grid above. "
+                                               "'#' starts a comment."}),
             }
         }
 
@@ -313,11 +356,14 @@ class H3LoraBlockSpec:
     FUNCTION = "build"
     CATEGORY = "loaders/h3"
     DESCRIPTION = ("Per-block spec for H3 LoRA Block Loader. Connect to its block_weights input; "
-                   "these rules are applied on top of the loader's sliders.")
+                   "these rules apply on top of the loader's sliders. The grid handles on/off per "
+                   "block, the text box handles fractional weights and overrides the grid.")
 
-    def build(self, spec):
-        parse_spec(spec)  # fail here, with a line number, rather than inside the loader
-        return (spec,)
+    def build(self, grid="", spec=""):
+        parts = [p for p in (spec_from_grid(grid), spec) if p and p.strip()]
+        combined = "\n".join(parts)
+        parse_spec(combined)  # fail here, with a line number, rather than inside the loader
+        return (combined,)
 
 
 NODE_CLASS_MAPPINGS = {
