@@ -6,14 +6,27 @@ conflict usually fixes it without giving up the parts you want.
 
 ## Nodes
 
-**H3 LoRA Block Loader** (`loaders/h3`) — takes `MODEL`, applies a LoRA with a separate
-strength per transformer block and per sublayer. Outputs the patched `MODEL` plus a
-`report` string showing exactly what was applied. Blocks resolved to `0` are skipped
-entirely — no patch is registered at all, so they cost nothing.
+**H3 LoRA Block Loader** (`loaders/h3`) — the everyday node. Numeric widgets only, no text
+editing required:
 
-**H3 LoRA Block Weights** (`loaders/h3`) — five sliders (blocks 0-9, 10-19, 20-29, 30-39,
-40-49) plus a token-refiner slider and a `target` selector. Outputs a spec string; plug it
-into the loader's `block_weights` input for slider-driven iteration.
+| widget | what it does |
+|---|---|
+| `strength` | global multiplier over everything below |
+| `layers` | `all`, or isolate to `attn` / `mlp` / `qkv` / `out` / `fc1` / `fc2` |
+| `blocks_00_09` … `blocks_40_49` | one strength per group of ten blocks |
+| `token_refiner` | strength for the 2 text-side refiner blocks |
+
+Outputs the patched `MODEL` plus a `report` string showing exactly what landed. Anything
+resolving to `0` is skipped entirely — no patch is registered, so it costs nothing.
+
+**H3 LoRA Block Spec** (`loaders/h3`) — optional. Only reach for it when a group of ten is
+too coarse and you want individual blocks. Connect its output to the loader's
+`block_weights` input; its rules apply **on top of** the sliders, so you can leave the
+loader set the way you like and override a single block.
+
+The loader's `block_weights` is a socket rather than a text box on purpose — a multiline
+widget claims the node's whole vertical space in ComfyUI, and the common case doesn't
+need one.
 
 ## What H3 loras actually contain
 
@@ -28,10 +41,11 @@ Rank-16 ai-toolkit LoRAs on this architecture patch 208 tensors:
 reach the video stack. When two LoRAs both patch it they compete over the same
 conditioning signal, so `refiner: 0.0` is the cheapest first experiment.
 
-## block_weights syntax
+## Spec syntax (H3 LoRA Block Spec)
 
-One `<selector>: <weight>` per line (commas also work). **Later lines override earlier
-ones**, so start broad and narrow down. `#` starts a comment.
+Only needed for per-block control. One `<selector>: <weight>` per line (commas also
+work). **Later lines override earlier ones**, and the whole spec lands after the loader's
+sliders, so you only write the exceptions. `#` starts a comment.
 
 ```
 *: 1.0          # baseline for everything
@@ -54,15 +68,18 @@ without editing the spec.
 
 ## Recipes for a LoRA that won't mix
 
-Try these in order — each is one line in `block_weights`:
+All of these are loader widgets — no spec node needed. Try them in order:
 
-```
-refiner: 0.0        # stop competing over prompt conditioning
-*.mlp: 0.0          # attention only; MLPs carry most of the memorized content
-0-9: 0.0            # drop early blocks (coarse motion / layout)
-40-49: 0.0          # drop late blocks (fine texture / detail)
-*: 0.6              # or just back the whole thing off, as a control
-```
+| try | how |
+|---|---|
+| stop competing over prompt conditioning | `token_refiner` → `0` |
+| attention only (MLPs carry most memorized content) | `layers` → `attn` |
+| drop early blocks (coarse motion / layout) | `blocks_00_09` → `0` |
+| drop late blocks (fine texture / detail) | `blocks_40_49` → `0` |
+| back the whole thing off, as a control | `strength` → `0.6` |
+
+`token_refiner` → `0` is the cheapest first test: it's only 8 of 208 tensors, so you keep
+~96% of the LoRA while removing the part most likely to collide.
 
 Read the `report` output to confirm what landed:
 

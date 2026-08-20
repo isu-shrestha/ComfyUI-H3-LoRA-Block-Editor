@@ -69,10 +69,17 @@ def check(label, cond, detail=""):
         failures.append(label)
 
 
-def run(spec, strength=1.0):
+def group_kwargs(**overrides):
+    kw = {"blocks_{:02d}_{:02d}".format(lo, hi): 1.0 for lo, hi in h3.BLOCK_GROUPS}
+    kw.update(overrides)
+    return kw
+
+
+def run(spec="", strength=1.0, layers="all", token_refiner=1.0, **groups):
     node = h3.H3LoraBlockLoader()
     src = FakePatcher()
-    model, report = node.apply(src, "test_lora.safetensors", strength, spec)
+    model, report = node.apply(src, "test_lora.safetensors", strength, layers,
+                               token_refiner, spec, **group_kwargs(**groups))
     return model, report, model.calls
 
 
@@ -119,13 +126,49 @@ check("negative: own group of 1", len(neg) == 1 and len(neg[0][1]) == 1, neg)
 check("negative: correct key",
       neg[0][1] == ["diffusion_model.blocks.25.attn.out_proj.weight"], neg[0][1])
 
+# --- slider-driven path, no spec connected at all --------------------------------
+_, _, calls = run()
+check("sliders: default is full strength", len(calls) == 1 and len(calls[0][1]) == 208, calls and len(calls[0][1]))
+
+_, report, calls = run(token_refiner=0.0)
+check("sliders: refiner slider mutes 8", len(calls[0][1]) == 200, len(calls[0][1]))
+check("sliders: no token_refiner key", not [k for k in calls[0][1] if "token_refiner" in k])
+
+_, _, calls = run(blocks_00_09=0.0)
+check("sliders: first group mutes 40", len(calls[0][1]) == 168, len(calls[0][1]))
+
+_, _, calls = run(layers="attn")
+check("sliders: layers=attn keeps 104", len(calls[0][1]) == 104, len(calls[0][1]))
+check("sliders: layers=attn drops all mlp",
+      not [k for k in calls[0][1] if ".mlp." in k])
+
+_, _, calls = run(layers="out")
+check("sliders: layers=out keeps 52", len(calls[0][1]) == 52, len(calls[0][1]))
+check("sliders: layers=out is only out_proj",
+      all("out_proj" in k for k in calls[0][1]))
+
+_, _, calls = run(blocks_20_29=0.5, blocks_30_39=0.5)
+by_strength = {s: len(keys) for s, keys in calls}
+check("sliders: two groups at 0.5", by_strength.get(0.5) == 80, by_strength)
+
+# --- a connected spec refines the sliders rather than replacing them --------------
+_, _, calls = run(spec="25: 0.1", blocks_20_29=0.5)
+by_strength = {s: len(keys) for s, keys in calls}
+check("spec+sliders: spec overrides one block", by_strength.get(0.1) == 4, by_strength)
+check("spec+sliders: rest of group keeps slider", by_strength.get(0.5) == 36, by_strength)
+check("spec+sliders: untouched groups stay 1.0", by_strength.get(1.0) == 168, by_strength)
+
+_, _, calls = run(spec="refiner: 1.0", token_refiner=0.0)
+check("spec+sliders: spec can re-enable refiner",
+      len([k for k in calls[0][1] if "token_refiner" in k]) == 8)
+
 # --- lora file is cached across invocations -------------------------------------
 node = h3.H3LoraBlockLoader()
 loads = []
 orig = utils_mod.load_torch_file
 utils_mod.load_torch_file = lambda *a, **k: (loads.append(1), orig(*a, **k))[1]
-node.apply(FakePatcher(), "test_lora.safetensors", 1.0, "*: 1.0")
-node.apply(FakePatcher(), "test_lora.safetensors", 1.0, "*: 0.5")
+node.apply(FakePatcher(), "test_lora.safetensors", 1.0, "all", 1.0, "*: 1.0", **group_kwargs())
+node.apply(FakePatcher(), "test_lora.safetensors", 1.0, "all", 1.0, "*: 0.5", **group_kwargs())
 check("cache: file read once over two runs", len(loads) == 1, len(loads))
 utils_mod.load_torch_file = orig
 

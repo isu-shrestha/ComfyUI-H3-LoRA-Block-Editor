@@ -62,17 +62,33 @@ assert h3.resolve_weight(rules, "block", 24, "mlp.fc1") == 0.5
 assert h3.resolve_weight(rules, "refiner", 0, "mlp.fc1") == 1.0
 print("ok  override ordering")
 
-# the slider node
-weights_node = h3.H3LoraBlockWeights()
-spec = weights_node.build("attn", 0.0, blocks_0_9=1.0, blocks_10_19=0.5,
-                          blocks_20_29=0.0, blocks_30_39=0.0, blocks_40_49=1.0)[0]
-print("--- slider output ---\n" + spec + "\n---")
+# the loader's slider widgets, isolated to attn
+spec = h3.spec_from_widgets("attn", [1.0, 0.5, 0.0, 0.0, 1.0], 0.0)
+print("--- widget spec (layers=attn) ---\n" + spec + "\n---")
 rules = h3.parse_spec(spec)
 assert h3.resolve_weight(rules, "block", 5, "attn.qkv_proj") == 1.0
 assert h3.resolve_weight(rules, "block", 5, "mlp.fc1") == 0.0
 assert h3.resolve_weight(rules, "block", 15, "attn.out_proj") == 0.5
 assert h3.resolve_weight(rules, "refiner", 1, "attn.qkv_proj") == 0.0
-print("ok  slider node round-trip")
+print("ok  widget spec, layer-isolated")
+
+# layers=all leaves the other sublayers alone
+rules = h3.parse_spec(h3.spec_from_widgets("all", [1.0, 0.5, 0.0, 0.0, 1.0], 0.25))
+assert h3.resolve_weight(rules, "block", 5, "mlp.fc1") == 1.0
+assert h3.resolve_weight(rules, "block", 15, "mlp.fc2") == 0.5
+assert h3.resolve_weight(rules, "refiner", 0, "attn.qkv_proj") == 0.25
+print("ok  widget spec, all layers")
+
+# the spec node validates and passes through
+spec_node = h3.H3LoraBlockSpec()
+assert spec_node.build("0-9: 0.5")[0] == "0-9: 0.5"
+assert spec_node.build("")[0] == ""
+try:
+    spec_node.build("0-9: nope")
+except ValueError as e:
+    print("ok  spec node rejects bad input ->", e)
+else:
+    failures.append("spec node should reject bad input")
 
 # error handling
 for bad, why in [("0-9 1.0", "missing colon"), ("0-9: abc", "bad number"), ("0-9.wat: 1", "bad layer")]:
