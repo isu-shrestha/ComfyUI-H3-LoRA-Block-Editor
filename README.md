@@ -37,9 +37,12 @@ Every cell shows its resolved weight, so the grid reads as a table of the number
 will actually be applied.
 
 - **click a cell** to toggle between `1.0` and `brush`; **drag** along a row to paint several
-- **click a row's number** to flip that row's multiplier
-- **click a bucket** to flip ten blocks at once; **drag** across buckets
+- **click a row's number** (beside `qkv`/`out`/`fc1`/`fc2`) to type an exact value
+- **click a bucket** in the `blocks` strip to type an exact value for those ten blocks
 - **click `reset`** to put everything back to `1.0`
+
+Cells are painted, because you flip a lot of them. The row and bucket numbers are typed,
+because those are the ones you reach for when you want a specific value like `0.5`.
 
 ### They do not compound
 

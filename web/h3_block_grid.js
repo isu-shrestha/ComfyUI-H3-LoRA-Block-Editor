@@ -12,7 +12,9 @@ import { app } from "../../scripts/app.js";
 // see is what gets applied.
 //
 // Clicking anything toggles it between 1.0 and the node's "brush" value, so a
-// brush of 0 mutes and 0.5 halves. Dragging paints across a row of cells.
+// brush of 0 mutes and 0.5 halves. Dragging paints across a row of cells. The row
+// and bucket numbers are typed rather than painted, since those are the ones you
+// reach for when you want an exact value.
 
 const ROWS = ["qkv", "out", "fc1", "fc2"];
 const N_BLOCKS = 50;
@@ -80,6 +82,30 @@ function parseState(text) {
     return state;
 }
 
+// A workflow saved against an older widget layout maps values positionally, so a
+// string like "all" can land in a float slot and render as NaN. Put those back.
+const NUMERIC_DEFAULTS = { strength: 1, brush: 0, token_refiner: 1 };
+
+function sanitizeNumbers(node) {
+    if (!node.widgets) return;
+    for (const w of node.widgets) {
+        if (w.name in NUMERIC_DEFAULTS && !Number.isFinite(Number(w.value))) {
+            w.value = NUMERIC_DEFAULTS[w.name];
+        }
+    }
+}
+
+// litegraph's value prompt, if this frontend exposes it
+function promptValue(title, current, onOk, event) {
+    const canvas = app.canvas;
+    if (!canvas || typeof canvas.prompt !== "function") return false;
+    canvas.prompt(title, String(current), (entered) => {
+        const v = Number(entered);
+        if (Number.isFinite(v)) onOk(v);
+    }, event);
+    return true;
+}
+
 function rowTop(index) {
     return TICK_H + BUCKET_H + index * ROW_H + (index >= 2 ? SPLIT_GAP : 0);
 }
@@ -109,7 +135,7 @@ function addGridWidget(node, stateWidget) {
         // state lives in the hidden string widget, so don't serialize twice
         serialize: false,
         state: parseState(stateWidget.value),
-        painting: null, // "cell" | "bucket"
+        painting: null, // "cell" while dragging along a row
         paintRow: null,
         paintValue: 1,
 
@@ -176,7 +202,7 @@ function addGridWidget(node, stateWidget) {
                 const x = gridX + k * cellW;
                 ctx.fillStyle = v === 1 ? COL_BUCKET : COL_BUCKET_SET;
                 ctx.fillRect(x, barTop + 1, cellW - 2, BUCKET_H - 3);
-                ctx.fillStyle = v === 1 ? COL_TEXT : COL_TEXT_HI;
+                ctx.fillStyle = COL_TEXT_HI;
                 ctx.textAlign = "center";
                 ctx.fillText(fmt(v), x + cellW * 0.5, barTop + BUCKET_H * 0.5);
             }
@@ -191,7 +217,7 @@ function addGridWidget(node, stateWidget) {
                 ctx.fillStyle = COL_TEXT_HI;
                 ctx.fillText(row, PAD, top + ROW_H * 0.5);
                 ctx.textAlign = "right";
-                ctx.fillStyle = rowMult === 1 ? COL_TEXT : COL_TEXT_HI;
+                ctx.fillStyle = COL_TEXT_HI;
                 ctx.fillText(fmt(rowMult), gridX - 4, top + ROW_H * 0.5);
                 ctx.textAlign = "left";
 
@@ -265,15 +291,26 @@ function addGridWidget(node, stateWidget) {
                 }
                 if (target.kind === "row") {
                     const current = num(this.state.rows[target.row]);
-                    this.state.rows[target.row] = current === 1 ? brush : 1;
-                    this.commit();
+                    const set = (v) => {
+                        this.state.rows[target.row] = v;
+                        this.commit();
+                    };
+                    if (!promptValue(target.row + " multiplier", current, set, event)) {
+                        set(current === 1 ? brush : 1); // no prompt available, fall back
+                    }
                     return true;
                 }
                 if (target.kind === "bucket") {
-                    this.paintValue = num(this.state.buckets[target.bucket]) === 1 ? brush : 1;
-                    this.state.buckets[target.bucket] = this.paintValue;
-                    this.painting = "bucket";
-                    this.commit();
+                    const lo = target.bucket * BUCKET_SIZE;
+                    const current = num(this.state.buckets[target.bucket]);
+                    const set = (v) => {
+                        this.state.buckets[target.bucket] = v;
+                        this.commit();
+                    };
+                    const label = "blocks " + lo + "-" + (lo + BUCKET_SIZE - 1);
+                    if (!promptValue(label, current, set, event)) {
+                        set(current === 1 ? brush : 1);
+                    }
                     return true;
                 }
                 this.paintValue = num(this.state[target.row][target.bucket]) === 1 ? brush : 1;
@@ -287,12 +324,7 @@ function addGridWidget(node, stateWidget) {
             if ((type === "pointermove" || type === "mousemove") && this.painting) {
                 const target = this.hit(pos);
                 if (!target) return true;
-                if (this.painting === "bucket" && target.kind === "bucket") {
-                    if (num(this.state.buckets[target.bucket]) !== this.paintValue) {
-                        this.state.buckets[target.bucket] = this.paintValue;
-                        this.commit();
-                    }
-                } else if (this.painting === "cell" && target.kind === "cell") {
+                if (this.painting === "cell" && target.kind === "cell") {
                     // stay on the row the drag started in, so a stray vertical
                     // wobble doesn't paint a neighbouring row
                     const row = this.paintRow;
@@ -341,6 +373,7 @@ app.registerExtension({
             if (!stateWidget) return result;
             hideWidget(stateWidget);
 
+            sanitizeNumbers(this);
             this.h3grid = addGridWidget(this, stateWidget);
             if (this.size[0] < 440) this.size[0] = 440;
             this.setSize(this.computeSize());
@@ -351,6 +384,7 @@ app.registerExtension({
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function () {
             const result = onConfigure ? onConfigure.apply(this, arguments) : undefined;
+            sanitizeNumbers(this);
             const stateWidget = this.widgets && this.widgets.find((w) => w.name === "grid");
             if (stateWidget && this.h3grid) {
                 this.h3grid.state = parseState(stateWidget.value);
