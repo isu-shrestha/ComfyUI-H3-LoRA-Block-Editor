@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+*.safetensors
+.DS_Store
+.vscode/
+.idea/
