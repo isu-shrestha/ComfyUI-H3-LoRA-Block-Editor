@@ -16,12 +16,12 @@ model ●                                        ● model
   brush                                   0.00
   token_refiner                           1.00
 
-reset      0     10    20    30    40    49
-blocks [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
- qkv  1  ▓▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒▒▓▓▓▓▓▓░░░░░░
- out  1  ▓▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒▒▓▓▓▓▓▓░░░░░░
- fc1 0.5 ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒░░░░░░
- fc2  1  ▓▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒▒▓▓▓▓▓▓░░░░░░
+reset     0-9   10-19  20-29  30-39  40-49
+blocks  [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
+ qkv  1 [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
+ out  1 [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
+ fc1 0.5[ 0.5 ][ 0.5 ][ 0.5 ][ 0.5 ][  0  ]
+ fc2  1 [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
 ● block_weights
 ```
 
@@ -29,11 +29,14 @@ Three controls, all painted with the same click:
 
 | control | what it covers |
 |---|---|
-| **cell** | one weight matrix in one block |
+| **cell** | one weight matrix across one bucket of ten blocks |
 | **row multiplier** (number beside `qkv`/`out`/`fc1`/`fc2`) | that matrix across all 50 blocks |
 | **bucket** (the `blocks` strip) | all four matrices across ten blocks |
 
-- **click a cell** to toggle between `1.0` and `brush`; **drag** to paint a range
+Every cell shows its resolved weight, so the grid reads as a table of the numbers that
+will actually be applied.
+
+- **click a cell** to toggle between `1.0` and `brush`; **drag** along a row to paint several
 - **click a row's number** to flip that row's multiplier
 - **click a bucket** to flip ten blocks at once; **drag** across buckets
 - **click `reset`** to put everything back to `1.0`
@@ -45,9 +48,12 @@ restrictive wins**. So `fc1` at `0.5` crossing a bucket at `0.5` stays `0.5`, no
 a resolved weight is always a number you actually typed. A lone value above `1.0` survives
 for the same reason: nothing else is competing with it.
 
-`brush` is what painting sets things to — `0` to mute, `0.5` to halve. Cells are drawn at
-their *resolved* weight: solid blue at `1.0`, dimmed for partial, grey at `0`, orange above
-`1.0`, red when negative.
+`brush` is what painting sets things to — `0` to mute, `0.5` to halve. Cells shade by
+resolved weight: solid blue at `1.0`, dimmed for partial, grey at `0`, orange above `1.0`,
+red when negative.
+
+Ten blocks per bucket is the granularity on offer. For anything finer, the `block_weights`
+socket still addresses individual blocks (`25.out: 0`), and it is applied after the grid.
 
 `strength` scales everything, so you can sweep the whole LoRA without repainting.
 

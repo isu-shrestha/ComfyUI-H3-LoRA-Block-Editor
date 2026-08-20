@@ -73,8 +73,8 @@ import json as _json
 
 
 def grid(**rows):
-    """Grid state JSON with every cell at 1.0 unless overridden."""
-    state = {r: [1] * h3.NUM_BLOCKS for r in h3.GRID_ROWS}
+    """Grid state JSON; one cell per bucket of ten blocks, 1.0 unless overridden."""
+    state = {r: [1] * h3.NUM_BUCKETS for r in h3.GRID_ROWS}
     state.update(rows)
     return _json.dumps(state)
 
@@ -140,7 +140,7 @@ check("grid: no token_refiner key", not [k for k in calls[0][1] if "token_refine
 
 # the grid covers the 50 blocks only; the refiner has its own widget, so muting
 # the mlp rows leaves the refiner's 4 mlp tensors alone
-_, _, calls = run(grid_state=grid(fc1=[0] * 50, fc2=[0] * 50))
+_, _, calls = run(grid_state=grid(fc1=[0] * 5, fc2=[0] * 5))
 check("grid: mlp rows off keeps 108", len(calls[0][1]) == 108, len(calls[0][1]))
 check("grid: mlp rows off drops every block mlp",
       not [k for k in calls[0][1] if ".mlp." in k and "token_refiner" not in k])
@@ -148,29 +148,29 @@ check("grid: refiner mlp survives the row mute",
       len([k for k in calls[0][1] if ".mlp." in k and "token_refiner" in k]) == 4)
 
 # and muting the mlp rows *and* the refiner does drop every mlp tensor
-_, _, calls = run(grid_state=grid(fc1=[0] * 50, fc2=[0] * 50), token_refiner=0.0)
+_, _, calls = run(grid_state=grid(fc1=[0] * 5, fc2=[0] * 5), token_refiner=0.0)
 check("grid+refiner: no mlp anywhere", not [k for k in calls[0][1] if ".mlp." in k])
 check("grid+refiner: 100 attn keys left", len(calls[0][1]) == 100, len(calls[0][1]))
 
-_, _, calls = run(grid_state=grid(qkv=[0] * 50, out=[0] * 50, fc1=[0] * 50))
+_, _, calls = run(grid_state=grid(qkv=[0] * 5, out=[0] * 5, fc1=[0] * 5))
 check("grid: one row on keeps 50 blocks + 8 refiner", len(calls[0][1]) == 58, len(calls[0][1]))
 check("grid: block survivors are only fc2",
       all("fc2" in k for k in calls[0][1] if "token_refiner" not in k))
 
-_, _, calls = run(grid_state=grid(qkv=[0] * 10 + [1] * 40))
-check("grid: ten cells off drops 10", len(calls[0][1]) == 198, len(calls[0][1]))
+_, _, calls = run(grid_state=grid(qkv=[0, 1, 1, 1, 1]))
+check("grid: one bucket off drops 10", len(calls[0][1]) == 198, len(calls[0][1]))
 
-_, _, calls = run(grid_state=grid(out=[0.5] * 50))
+_, _, calls = run(grid_state=grid(out=[0.5] * 5))
 by_strength = {s: len(keys) for s, keys in calls}
 check("grid: fractional row is its own group", by_strength.get(0.5) == 50, by_strength)
 check("grid: rest stays at 1.0", by_strength.get(1.0) == 158, by_strength)
 
-_, _, calls = run(grid_state=grid(qkv=[0] * 50), strength=0.65)
+_, _, calls = run(grid_state=grid(qkv=[0] * 5), strength=0.65)
 by_strength = {s: len(keys) for s, keys in calls}
 check("grid: strength scales the survivors", by_strength.get(0.65) == 158, by_strength)
 
 # --- wired text overrides the grid -------------------------------------------------
-_, _, calls = run(spec="0-9.qkv: 1.0", grid_state=grid(qkv=[0] * 50))
+_, _, calls = run(spec="0-9.qkv: 1.0", grid_state=grid(qkv=[0] * 5))
 by_strength = {s: len(keys) for s, keys in calls}
 check("text over grid: 10 cells restored", by_strength.get(1.0) == 168, by_strength)
 

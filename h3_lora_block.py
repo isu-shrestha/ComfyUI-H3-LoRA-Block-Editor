@@ -301,10 +301,24 @@ def combine(*factors):
     return min(opinions) if opinions else 1.0
 
 
-def grid_weights(grid_state):
-    """Resolve the grid's three controls into {row: [50 weights]}.
+def _cells_to_buckets(cells):
+    """Read a row's cells as NUM_BUCKETS values.
 
-    State is {"qkv": [50 cells], "out": [...], "fc1": [...], "fc2": [...],
+    Older state stored one value per block; fold those down by taking the most
+    restrictive value in each bucket so an existing workflow keeps its mutes.
+    """
+    if len(cells) == NUM_BUCKETS:
+        return [_number(c) for c in cells]
+    if len(cells) == NUM_BLOCKS:
+        return [min(_number(c) for c in cells[k * BUCKET_SIZE:(k + 1) * BUCKET_SIZE])
+                for k in range(NUM_BUCKETS)]
+    return [1.0] * NUM_BUCKETS
+
+
+def grid_weights(grid_state):
+    """Resolve the grid's three controls into {row: [NUM_BUCKETS weights]}.
+
+    State is {"qkv": [5 cells], "out": [...], "fc1": [...], "fc2": [...],
               "rows": {row: multiplier}, "buckets": [5 multipliers]}.
     Each bucket covers ten blocks, matching the grid's tick marks.
     """
@@ -327,20 +341,18 @@ def grid_weights(grid_state):
         if not isinstance(cells, list) or not cells:
             continue
         row_mult = _number(row_mults.get(row))
-        weights = []
-        for index, cell in enumerate(cells):
-            bucket = index // BUCKET_SIZE
-            bucket_mult = _number(buckets[bucket]) if bucket < len(buckets) else 1.0
-            weights.append(combine(_number(cell), row_mult, bucket_mult))
-        resolved[row] = weights
+        resolved[row] = [
+            combine(cell, row_mult, _number(buckets[k]) if k < len(buckets) else 1.0)
+            for k, cell in enumerate(_cells_to_buckets(cells))
+        ]
     return resolved
 
 
 def spec_from_grid(grid_state):
     """Compile the grid's resolved weights into spec lines.
 
-    Only weights that differ from 1.0 emit a rule, and runs of equal weights
-    collapse into ranges, so an untouched grid produces nothing at all.
+    Only weights that differ from 1.0 emit a rule, and adjacent buckets holding
+    the same weight merge into one range, so an untouched grid emits nothing.
     """
     lines = []
     for row, weights in grid_weights(grid_state).items():
@@ -349,9 +361,9 @@ def spec_from_grid(grid_state):
             if i == len(weights) or weights[i] != weights[start]:
                 weight = weights[start]
                 if weight != 1.0:
-                    lo, hi = start, i - 1
-                    label = str(lo) if lo == hi else "{}-{}".format(lo, hi)
-                    lines.append("{}.{}: {:.4g}".format(label, row, weight))
+                    lo = start * BUCKET_SIZE
+                    hi = i * BUCKET_SIZE - 1
+                    lines.append("{}-{}.{}: {:.4g}".format(lo, hi, row, weight))
                 start = i
     return "\n".join(lines)
 
