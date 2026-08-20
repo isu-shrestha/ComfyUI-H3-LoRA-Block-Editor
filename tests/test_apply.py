@@ -79,10 +79,10 @@ def grid(**rows):
     return _json.dumps(state)
 
 
-def run(spec="", strength=1.0, token_refiner=1.0, grid_state="", brush=0.0):
+def run(spec="", strength=1.0, token_refiner=1.0, grid_state=""):
     node = h3.H3LoraBlockLoader()
     src = FakePatcher()
-    model, report = node.apply(src, "test_lora.safetensors", strength, brush,
+    model, report = node.apply(src, "test_lora.safetensors", strength,
                                token_refiner, grid_state, spec)
     return model, report, model.calls
 
@@ -183,8 +183,8 @@ node = h3.H3LoraBlockLoader()
 loads = []
 orig = utils_mod.load_torch_file
 utils_mod.load_torch_file = lambda *a, **k: (loads.append(1), orig(*a, **k))[1]
-node.apply(FakePatcher(), "test_lora.safetensors", 1.0, 0.0, 1.0, "", "*: 1.0")
-node.apply(FakePatcher(), "test_lora.safetensors", 1.0, 0.0, 1.0, "", "*: 0.5")
+node.apply(FakePatcher(), "test_lora.safetensors", 1.0, 1.0, "", "*: 1.0")
+node.apply(FakePatcher(), "test_lora.safetensors", 1.0, 1.0, "", "*: 0.5")
 check("cache: file read once over two runs", len(loads) == 1, len(loads))
 utils_mod.load_torch_file = orig
 

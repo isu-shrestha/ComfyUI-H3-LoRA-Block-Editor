@@ -13,37 +13,32 @@ model ●                                        ● model
                                                ● report
   lora_name              my_h3_lora.safetensors
   strength                                1.00
-  brush                                   0.00
   token_refiner                           1.00
 
 reset   mult   0-9   10-19  20-29  30-39  40-49
-mult         [  1  ][  1  ][ 0.5 ][  1  ][  0  ]   <- column multipliers
+mult         [  1  ][  1  ][ 0.5 ][  1  ][  0  ]   <- column weights
 qkv       1  [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
-out       1  [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
+out       1  [  1  ][  1  ][ 0.5 ][  0  ][  0  ]
 fc1     0.5  [ 0.5 ][ 0.5 ][ 0.5 ][ 0.5 ][  0  ]
 fc2       1  [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
-          ^ row multipliers
+          ^ row weights
 ● block_weights
 ```
 
-Three controls, all painted with the same click:
+The weights live on the axes; the cells are on/off:
 
-| control | what it covers |
+| control | what it does |
 |---|---|
-| **cell** | one weight matrix across one bucket of ten blocks |
-| **row multiplier** (the `mult` column) | that matrix across all 50 blocks |
-| **column multiplier** (the `mult` row) | all four matrices across ten blocks |
+| **row weight** (the `mult` column) | sets that weight matrix across all 50 blocks |
+| **column weight** (the `mult` row) | sets all four matrices across ten blocks |
+| **cell** | switches one matrix on or off for one bucket of ten blocks |
+
+- **click a row or column weight** to type a value
+- **click a cell** to toggle it on or off; **drag** along a row to flip several
+- **click `reset`** to put everything back to `1.0`
 
 Every cell shows its resolved weight, so the grid reads as a table of the numbers that
 will actually be applied.
-
-- **click a cell** to toggle between `1.0` and `brush`; **drag** along a row to paint several
-- **click a row multiplier** in the `mult` column to type an exact value
-- **click a column multiplier** in the `mult` row to type an exact value for those ten blocks
-- **click `reset`** to put everything back to `1.0`
-
-Cells are painted, because you flip a lot of them. The row and bucket numbers are typed,
-because those are the ones you reach for when you want a specific value like `0.5`.
 
 ### They do not compound
 
@@ -52,9 +47,7 @@ restrictive wins**. So `fc1` at `0.5` crossing a bucket at `0.5` stays `0.5`, no
 a resolved weight is always a number you actually typed. A lone value above `1.0` survives
 for the same reason: nothing else is competing with it.
 
-`brush` is what painting sets things to — `0` to mute, `0.5` to halve. Left at `1.0` it
-mutes, since toggling `1` against `1` would leave the click doing nothing. Cells shade by
-resolved weight: solid blue at `1.0`, dimmed for partial, grey at `0`, orange above `1.0`,
+Cells shade by resolved weight: solid blue at `1.0`, dimmed for partial, grey at `0`, orange above `1.0`,
 red when negative.
 
 Ten blocks per bucket is the granularity on offer. For anything finer, the `block_weights`
@@ -113,9 +106,9 @@ All of these are on the one node. Try them in order:
 | try | how |
 |---|---|
 | stop competing over prompt conditioning | `token_refiner` → `0` |
-| attention only (MLPs carry most memorized content) | set the `fc1` and `fc2` row multipliers to `0` |
-| drop early blocks (coarse motion / layout) | set the first `blocks` bucket to `0` |
-| drop late blocks (fine texture / detail) | set the last `blocks` bucket to `0` |
+| attention only (MLPs carry most memorized content) | set the `fc1` and `fc2` row weights to `0` |
+| drop early blocks (coarse motion / layout) | set the `0-9` column weight to `0` |
+| drop late blocks (fine texture / detail) | set the `40-49` column weight to `0` |
 | back the whole thing off, as a control | `strength` → `0.6` |
 
 `token_refiner` → `0` is the cheapest first test: it's only 8 of 208 tensors, so you keep

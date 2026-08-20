@@ -5,16 +5,13 @@ import { app } from "../../scripts/app.js";
 // node's hidden "grid" string widget; Python compiles that into its spec DSL, so
 // this is purely an editor and the node still works if the widget fails to load.
 //
-// Three controls decide a cell's weight: the cell itself, its row multiplier,
-// and the multiplier for its bucket of ten blocks. They do not compound -- the
-// most restrictive wins, and 1.0 means "no opinion" -- so a resolved weight is
-// always a number that was actually set. Cells are drawn resolved, so what you
-// see is what gets applied.
+// A cell's weight comes from three controls: the cell's own on/off state, its row
+// multiplier, and its column multiplier. They do not compound -- the most
+// restrictive wins, and 1.0 means "no opinion" -- so a resolved weight is always a
+// number that was actually set. Cells are drawn resolved, so what you see applies.
 //
-// Clicking anything toggles it between 1.0 and the node's "brush" value, so a
-// brush of 0 mutes and 0.5 halves. Dragging paints across a row of cells. The row
-// and bucket numbers are typed rather than painted, since those are the ones you
-// reach for when you want an exact value.
+// Cells are plain on/off toggles -- click one, or drag along a row to flip several.
+// The weights live on the axes: click a row or column multiplier to type a value.
 
 const ROWS = ["qkv", "out", "fc1", "fc2"];
 const N_BLOCKS = 50;
@@ -84,7 +81,7 @@ function parseState(text) {
 
 // A workflow saved against an older widget layout maps values positionally, so a
 // string like "all" can land in a float slot and render as NaN. Put those back.
-const NUMERIC_DEFAULTS = { strength: 1, brush: 0, token_refiner: 1 };
+const NUMERIC_DEFAULTS = { strength: 1, token_refiner: 1 };
 
 function sanitizeNumbers(node) {
     if (!node.widgets) return;
@@ -138,14 +135,6 @@ function addGridWidget(node, stateWidget) {
         painting: null, // "cell" while dragging along a row
         paintRow: null,
         paintValue: 1,
-
-        brush() {
-            const w = node.widgets && node.widgets.find((x) => x.name === "brush");
-            const v = num(w ? w.value : 0, 0);
-            // 1.0 would toggle against itself and leave the control dead, so a
-            // brush of 1 means "mute" -- the thing you almost always want first
-            return v === 1 ? 0 : v;
-        },
 
         // a cell's applied weight: the most restrictive of the three controls,
         // where 1.0 counts as "no opinion" (mirrors combine() in the python)
@@ -287,8 +276,6 @@ function addGridWidget(node, stateWidget) {
             if (type === "pointerdown" || type === "mousedown") {
                 const target = this.hit(pos);
                 if (!target) return false;
-                const brush = this.brush();
-
                 if (target.kind === "reset") {
                     this.state = emptyState();
                     this.commit();
@@ -301,7 +288,7 @@ function addGridWidget(node, stateWidget) {
                         this.commit();
                     };
                     if (!promptValue(target.row + " multiplier", current, set, event)) {
-                        set(current === 1 ? brush : 1); // no prompt available, fall back
+                        set(current === 1 ? 0 : 1); // no prompt available, fall back
                     }
                     return true;
                 }
@@ -314,11 +301,11 @@ function addGridWidget(node, stateWidget) {
                     };
                     const label = "blocks " + lo + "-" + (lo + BUCKET_SIZE - 1);
                     if (!promptValue(label, current, set, event)) {
-                        set(current === 1 ? brush : 1);
+                        set(current === 1 ? 0 : 1);
                     }
                     return true;
                 }
-                this.paintValue = num(this.state[target.row][target.bucket]) === 1 ? brush : 1;
+                this.paintValue = num(this.state[target.row][target.bucket]) === 1 ? 0 : 1;
                 this.state[target.row][target.bucket] = this.paintValue;
                 this.painting = "cell";
                 this.paintRow = target.row;
