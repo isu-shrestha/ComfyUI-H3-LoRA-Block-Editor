@@ -4,53 +4,47 @@ Per-block LoRA strength control for MiniMax H3 in ComfyUI. Built for the case wh
 LoRA works alone but fights other LoRAs when stacked — muting the blocks that carry the
 conflict usually fixes it without giving up the parts you want.
 
-## Nodes
+## The node
 
-**H3 LoRA Block Loader** (`loaders/h3`) — the everyday node. Numeric widgets only, no text
-editing required:
-
-| widget | what it does |
-|---|---|
-| `strength` | global multiplier over everything below |
-| `layers` | `all`, or isolate to `attn` / `mlp` / `qkv` / `out` / `fc1` / `fc2` |
-| `blocks_00_09` … `blocks_40_49` | one strength per group of ten blocks |
-| `token_refiner` | strength for the 2 text-side refiner blocks |
-
-Outputs the patched `MODEL` plus a `report` string showing exactly what landed. Anything
-resolving to `0` is skipped entirely — no patch is registered, so it costs nothing.
-
-**H3 LoRA Block Spec** (`loaders/h3`) — optional. Reach for it when a group of ten is too
-coarse. Connect its output to the loader's `block_weights` input; its rules apply **on top
-of** the sliders, so you can leave the loader set the way you like and override a single
-block.
-
-It carries a paint grid — four rows (the weight matrices inside every block) by fifty
-columns (the blocks):
+One node, `H3 LoRA Block Loader` (`loaders/h3`):
 
 ```
+model ●                                    ● model
+                                           ● report
+  lora_name          my_h3_lora.safetensors
+  strength                            1.00
+  brush                               0.00
+  token_refiner                       1.00
+
         0    10    20    30    40   49
  all
  qkv  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░
  out  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░
  fc1  ░░░░░░░░░░▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
  fc2  ░░░░░░░░░░▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+● block_weights
 ```
 
-- **click a cell** to toggle that block's matrix on or off
-- **drag across cells** to paint a range — the first cell decides whether you're setting
-  or clearing
+The grid is the whole interface. Four rows are the weight matrices the LoRA patches
+inside every block; fifty columns are the blocks.
+
+- **click a cell** to toggle between `1.0` and `brush`
+- **drag across cells** to paint a range — the first cell decides the direction
 - **click a row label** (`qkv`, `out`, `fc1`, `fc2`) to flip that whole row
 - **click `all`** to flip everything
 
-The grid is on/off only. For fractional weights, type them in the text box below — it is
-appended after the grid, so it overrides it. Cells holding a fractional value from the
-text box render dimmed rather than solid.
+`brush` is what painting sets a cell to. Leave it at `0` to mute, or set `0.5` to halve.
+Cells render solid blue at `1.0`, dimmed for partial values, grey at `0`, orange above
+`1.0` and red when negative.
 
-An untouched grid emits no rules at all, so it never silently overrides the loader.
+`strength` multiplies every cell, so you can sweep the whole LoRA without repainting.
 
-The loader's `block_weights` is a socket rather than a text box on purpose — a multiline
-widget claims the node's whole vertical space in ComfyUI, and the common case doesn't
-need one.
+`token_refiner` covers the 2 text-side refiner blocks, which the grid does **not** include
+— the grid is the 50 main blocks only.
+
+`block_weights` is an optional socket for a text spec, applied after the grid so it
+overrides. You only need it for things the grid cannot say, such as targeting one refiner
+block (`refiner.0.attn: 0.5`). Wire any node that outputs a `STRING`.
 
 ## What H3 loras actually contain
 
@@ -65,11 +59,11 @@ Rank-16 ai-toolkit LoRAs on this architecture patch 208 tensors:
 reach the video stack. When two LoRAs both patch it they compete over the same
 conditioning signal, so `refiner: 0.0` is the cheapest first experiment.
 
-## Spec syntax (H3 LoRA Block Spec)
+## Spec syntax (optional `block_weights` socket)
 
-Only needed for per-block control. One `<selector>: <weight>` per line (commas also
-work). **Later lines override earlier ones**, and the whole spec lands after the loader's
-sliders, so you only write the exceptions. `#` starts a comment.
+Rarely needed — the grid covers per-block control. One `<selector>: <weight>` per line (commas
+also work). **Later lines override earlier ones**, and the spec lands after the grid, so
+you only write the exceptions. `#` starts a comment.
 
 ```
 *: 1.0          # baseline for everything
@@ -92,14 +86,14 @@ without editing the spec.
 
 ## Recipes for a LoRA that won't mix
 
-All of these are loader widgets — no spec node needed. Try them in order:
+All of these are on the one node. Try them in order:
 
 | try | how |
 |---|---|
 | stop competing over prompt conditioning | `token_refiner` → `0` |
-| attention only (MLPs carry most memorized content) | `layers` → `attn` |
-| drop early blocks (coarse motion / layout) | `blocks_00_09` → `0` |
-| drop late blocks (fine texture / detail) | `blocks_40_49` → `0` |
+| attention only (MLPs carry most memorized content) | click the `fc1` and `fc2` row labels |
+| drop early blocks (coarse motion / layout) | drag across columns 0-9, all four rows |
+| drop late blocks (fine texture / detail) | drag across columns 40-49 |
 | back the whole thing off, as a control | `strength` → `0.6` |
 
 `token_refiner` → `0` is the cheapest first test: it's only 8 of 208 tensors, so you keep

@@ -1,9 +1,13 @@
 import { app } from "../../scripts/app.js";
 
-// Paints a 4 x 50 on/off grid (attention + mlp weight matrices, one column per
-// transformer block) into the H3 LoRA Block Spec node. The grid's state is kept
-// as JSON in the node's hidden "grid" string widget; Python compiles that into
-// the same spec DSL the text box below uses, so this is purely an editor.
+// Paints a 4 x 50 grid (attention + mlp weight matrices, one column per
+// transformer block) onto the H3 LoRA Block Loader. State is kept as JSON in the
+// node's hidden "grid" string widget; Python compiles that into its spec DSL, so
+// this is purely an editor and the node still works if the widget fails to load.
+//
+// Clicking a cell toggles it between 1.0 and the node's "brush" value, so a brush
+// of 0 mutes and 0.5 halves. Dragging paints, and the label column flips whole
+// rows (or everything, from the "all" label in the header).
 
 const ROWS = ["qkv", "out", "fc1", "fc2"];
 const N_BLOCKS = 50;
@@ -16,6 +20,8 @@ const SPLIT_GAP = 4; // between the attention rows and the mlp rows
 
 const COL_ON = "#5c9ded";
 const COL_OFF = "#2b2b2b";
+const COL_BOOST = "#e0a458";
+const COL_NEG = "#d16a6a";
 const COL_LINE = "#1a1a1a";
 const COL_TEXT = "#9a9a9a";
 const COL_TEXT_HI = "#d8d8d8";
@@ -61,6 +67,12 @@ function addGridWidget(node, stateWidget) {
         state: parseState(stateWidget.value),
         painting: false,
         paintValue: 0,
+
+        brush() {
+            const w = node.widgets && node.widgets.find((x) => x.name === "brush");
+            const v = w ? Number(w.value) : 0;
+            return Number.isFinite(v) ? v : 0;
+        },
 
         computeSize(width) {
             return [width, gridHeight()];
@@ -110,16 +122,20 @@ function addGridWidget(node, stateWidget) {
                 for (let b = 0; b < N_BLOCKS; b++) {
                     const v = values[b];
                     const x = gridX + b * cellW;
-                    if (v >= 1) {
+                    if (v > 1) {
+                        ctx.fillStyle = COL_BOOST; // above full strength
+                    } else if (v === 1) {
                         ctx.fillStyle = COL_ON;
-                    } else if (v <= 0) {
+                    } else if (v < 0) {
+                        ctx.fillStyle = COL_NEG; // inverted
+                    } else if (v === 0) {
                         ctx.fillStyle = COL_OFF;
                     } else {
-                        // fractional values (typed into the text box) show dimmed
+                        // partial strength draws dimmed over the off colour
                         ctx.fillStyle = COL_OFF;
                         ctx.fillRect(x, top + 1, Math.max(1, cellW - 1), ROW_H - 3);
                         ctx.fillStyle = COL_ON;
-                        ctx.globalAlpha = Math.max(0.15, Math.min(1, v));
+                        ctx.globalAlpha = Math.max(0.2, v);
                     }
                     ctx.fillRect(x, top + 1, Math.max(1, cellW - 1), ROW_H - 3);
                     ctx.globalAlpha = 1;
@@ -162,8 +178,8 @@ function addGridWidget(node, stateWidget) {
             return null;
         },
 
-        anyOn(values) {
-            return values.some((v) => v > 0);
+        isPainted(values) {
+            return values.some((v) => v !== 1);
         },
 
         mouse(event, pos, node) {
@@ -173,20 +189,22 @@ function addGridWidget(node, stateWidget) {
                 const target = this.hit(pos);
                 if (!target) return false;
 
+                const brush = this.brush();
+
                 if (target.kind === "all") {
-                    const on = ROWS.some((r) => this.anyOn(this.state[r]));
-                    for (const r of ROWS) this.state[r] = new Array(N_BLOCKS).fill(on ? 0 : 1);
+                    const painted = ROWS.some((r) => this.isPainted(this.state[r]));
+                    for (const r of ROWS) this.state[r] = new Array(N_BLOCKS).fill(painted ? 1 : brush);
                     this.commit();
                     return true;
                 }
                 if (target.kind === "row") {
-                    const on = this.anyOn(this.state[target.row]);
-                    this.state[target.row] = new Array(N_BLOCKS).fill(on ? 0 : 1);
+                    const painted = this.isPainted(this.state[target.row]);
+                    this.state[target.row] = new Array(N_BLOCKS).fill(painted ? 1 : brush);
                     this.commit();
                     return true;
                 }
-                // painting a cell: the first cell decides whether we set or clear
-                this.paintValue = this.state[target.row][target.block] > 0 ? 0 : 1;
+                // painting a cell: the first cell decides whether we paint or restore
+                this.paintValue = this.state[target.row][target.block] === 1 ? brush : 1;
                 this.state[target.row][target.block] = this.paintValue;
                 this.painting = true;
                 this.commit();
@@ -230,7 +248,7 @@ app.registerExtension({
     name: "h3.lora.block.grid",
 
     async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (nodeData.name !== "H3LoraBlockSpec") return;
+        if (nodeData.name !== "H3LoraBlockLoader") return;
 
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {

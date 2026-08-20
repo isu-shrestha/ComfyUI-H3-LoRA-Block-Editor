@@ -42,17 +42,8 @@ WILDCARDS = ("*", "all")
 
 KEY_RE = re.compile(r"^diffusion_model\.(token_refiner\.)?blocks\.(\d+)\.(.+)\.weight$")
 
-BLOCK_GROUPS = ((0, 9), (10, 19), (20, 29), (30, 39), (40, 49))
-LAYER_CHOICES = ("all", "attn", "mlp", "qkv", "out", "fc1", "fc2")
-
-SPEC_PLACEHOLDER = (
-    "one  <selector>: <weight>  per line, later lines win\n"
-    "\n"
-    "refiner: 0.0        drop the text-refiner patch\n"
-    "0-9: 0.0            mute the first 10 blocks\n"
-    "20-35.attn: 1.2     push mid-block attention\n"
-    "blocks.49.out: -1.0 invert one layer"
-)
+GRID_ROWS = ("qkv", "out", "fc1", "fc2")
+NUM_BLOCKS = 50
 
 
 def parse_model_key(key):
@@ -185,17 +176,19 @@ def format_report(lora_name, strength, applied, blocks_seen, refiner_seen, skipp
     return "\n".join(lines)
 
 
-def spec_from_widgets(layers, group_values, token_refiner):
-    """Turn the loader's slider widgets into spec lines."""
-    suffix = "" if layers == "all" else "." + layers
-    lines = []
-    if suffix:
-        # isolating a layer type means everything else is off
-        lines.append("*: 0.0")
-    for (lo, hi), value in zip(BLOCK_GROUPS, group_values):
-        lines.append("{}-{}{}: {:.4g}".format(lo, hi, suffix, value))
-    lines.append("refiner{}: {:.4g}".format(suffix, token_refiner))
-    return "\n".join(lines)
+def build_spec(token_refiner, grid_state, block_weights):
+    """Assemble the full spec: refiner widget, then the grid, then any wired text.
+
+    Everything defaults to 1.0, so only departures from that need a rule. Later
+    lines win, which is why the wired text can override anything the grid says.
+    """
+    parts = ["refiner: {:.4g}".format(token_refiner)]
+    from_grid = spec_from_grid(grid_state)
+    if from_grid:
+        parts.append(from_grid)
+    if block_weights and block_weights.strip():
+        parts.append(block_weights)
+    return "\n".join(parts)
 
 
 class H3LoraBlockLoader:
@@ -204,29 +197,28 @@ class H3LoraBlockLoader:
 
     @classmethod
     def INPUT_TYPES(cls):
-        group = {"default": 1.0, "min": -2.0, "max": 2.0, "step": 0.05}
-        required = {
-            "model": ("MODEL", {"tooltip": "The H3 diffusion model to patch."}),
-            "lora_name": (folder_paths.get_filename_list("loras"), {"tooltip": "The LoRA to apply."}),
-            "strength": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step": 0.01,
-                                   "tooltip": "Global multiplier applied on top of every block weight."}),
-            "layers": (list(LAYER_CHOICES), {"default": "all",
-                                             "tooltip": "Restrict the LoRA to one layer type. "
-                                                        "Anything but 'all' mutes the rest -- "
-                                                        "'attn' is the usual first try when two LoRAs fight."}),
-        }
-        for lo, hi in BLOCK_GROUPS:
-            required["blocks_{:02d}_{:02d}".format(lo, hi)] = (
-                "FLOAT", dict(group, tooltip="Strength for blocks {}-{}. 0 skips them entirely.".format(lo, hi)))
-        required["token_refiner"] = (
-            "FLOAT", dict(group, tooltip="Strength for the 2 text-side refiner blocks. "
-                                         "Set to 0 first when a LoRA won't mix -- it is only 8 of 208 tensors."))
         return {
-            "required": required,
+            "required": {
+                "model": ("MODEL", {"tooltip": "The H3 diffusion model to patch."}),
+                "lora_name": (folder_paths.get_filename_list("loras"), {"tooltip": "The LoRA to apply."}),
+                "strength": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step": 0.01,
+                                       "tooltip": "Global multiplier applied on top of every cell in the grid."}),
+                "brush": ("FLOAT", {"default": 0.0, "min": -2.0, "max": 2.0, "step": 0.05,
+                                    "tooltip": "What painting a cell sets it to. Clicking toggles between "
+                                               "1.0 and this value, so 0 mutes and 0.5 halves."}),
+                "token_refiner": ("FLOAT", {"default": 1.0, "min": -2.0, "max": 2.0, "step": 0.05,
+                                            "tooltip": "Strength for the 2 text-side refiner blocks, which the "
+                                                       "grid does not cover. Set to 0 first when a LoRA won't "
+                                                       "mix -- it is only 8 of 208 tensors."}),
+                "grid": ("STRING", {"default": "",
+                                    "tooltip": "Painted by the grid widget. Untouched it emits nothing "
+                                               "and the whole LoRA applies at full strength."}),
+            },
             "optional": {
                 "block_weights": ("STRING", {"forceInput": True,
-                                             "tooltip": "Optional fine-grained spec, applied on top of the "
-                                                        "sliders above. Connect an H3 LoRA Block Spec node."}),
+                                             "tooltip": "Optional text spec, applied after the grid so it "
+                                                        "overrides. Only needed for things the grid cannot "
+                                                        "say, like 'refiner.0.attn: 0.5'."}),
             },
         }
 
@@ -235,18 +227,14 @@ class H3LoraBlockLoader:
     OUTPUT_TOOLTIPS = ("The patched diffusion model.", "Resolved per-block strengths, for sanity checking.")
     FUNCTION = "apply"
     CATEGORY = "loaders/h3"
-    DESCRIPTION = ("Applies a LoRA to a MiniMax H3 model with a separate strength per block group "
-                   "and layer type. Groups set to 0 are skipped entirely, which is the usual fix "
-                   "when a LoRA refuses to share a stack with another one. For per-block control, "
-                   "connect an H3 LoRA Block Spec node.")
+    DESCRIPTION = ("Applies a LoRA to a MiniMax H3 model with a separate strength per transformer "
+                   "block and per weight matrix, painted on a 4x50 grid. Cells at 0 are skipped "
+                   "entirely, which is the usual fix when a LoRA refuses to share a stack with "
+                   "another one.")
 
-    def apply(self, model, lora_name, strength, layers, token_refiner, block_weights="", **kwargs):
-        group_values = [kwargs["blocks_{:02d}_{:02d}".format(lo, hi)] for lo, hi in BLOCK_GROUPS]
-        spec = spec_from_widgets(layers, group_values, token_refiner)
-        if block_weights and block_weights.strip():
-            # the connected spec refines the sliders rather than replacing them
-            spec = spec + "\n" + block_weights
-        rules = parse_spec(spec)
+    def apply(self, model, lora_name, strength, brush, token_refiner, grid="", block_weights=""):
+        del brush  # the grid widget reads it in the frontend; nothing to do here
+        rules = parse_spec(build_spec(token_refiner, grid, block_weights))
 
         lora_path = folder_paths.get_full_path_or_raise("loras", lora_name)
         if self.loaded_lora is not None and self.loaded_lora[0] == lora_path:
@@ -293,10 +281,6 @@ class H3LoraBlockLoader:
         return (patched, report)
 
 
-GRID_ROWS = ("qkv", "out", "fc1", "fc2")
-NUM_BLOCKS = 50
-
-
 def spec_from_grid(grid_state):
     """Compile the grid widget's JSON state into spec lines.
 
@@ -331,47 +315,10 @@ def spec_from_grid(grid_state):
     return "\n".join(lines)
 
 
-class H3LoraBlockSpec:
-    """Per-block control: a grid you paint, plus free-form text for the fine print."""
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "grid": ("STRING", {"default": "",
-                                    "tooltip": "Painted by the grid widget. Left as-is it emits "
-                                               "nothing and the loader's sliders govern."}),
-                "spec": ("STRING", {"multiline": True, "default": "",
-                                    "placeholder": SPEC_PLACEHOLDER,
-                                    "tooltip": "Selectors: '*', '0-9', '12', 'refiner', with an "
-                                               "optional layer suffix ('.attn', '.mlp', '.qkv', "
-                                               "'.out', '.fc1', '.fc2'). Later lines override "
-                                               "earlier ones, including the grid above. "
-                                               "'#' starts a comment."}),
-            }
-        }
-
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("block_weights",)
-    FUNCTION = "build"
-    CATEGORY = "loaders/h3"
-    DESCRIPTION = ("Per-block spec for H3 LoRA Block Loader. Connect to its block_weights input; "
-                   "these rules apply on top of the loader's sliders. The grid handles on/off per "
-                   "block, the text box handles fractional weights and overrides the grid.")
-
-    def build(self, grid="", spec=""):
-        parts = [p for p in (spec_from_grid(grid), spec) if p and p.strip()]
-        combined = "\n".join(parts)
-        parse_spec(combined)  # fail here, with a line number, rather than inside the loader
-        return (combined,)
-
-
 NODE_CLASS_MAPPINGS = {
     "H3LoraBlockLoader": H3LoraBlockLoader,
-    "H3LoraBlockSpec": H3LoraBlockSpec,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "H3LoraBlockLoader": "H3 LoRA Block Loader",
-    "H3LoraBlockSpec": "H3 LoRA Block Spec",
 }

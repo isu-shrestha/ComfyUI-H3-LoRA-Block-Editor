@@ -62,34 +62,6 @@ assert h3.resolve_weight(rules, "block", 24, "mlp.fc1") == 0.5
 assert h3.resolve_weight(rules, "refiner", 0, "mlp.fc1") == 1.0
 print("ok  override ordering")
 
-# the loader's slider widgets, isolated to attn
-spec = h3.spec_from_widgets("attn", [1.0, 0.5, 0.0, 0.0, 1.0], 0.0)
-print("--- widget spec (layers=attn) ---\n" + spec + "\n---")
-rules = h3.parse_spec(spec)
-assert h3.resolve_weight(rules, "block", 5, "attn.qkv_proj") == 1.0
-assert h3.resolve_weight(rules, "block", 5, "mlp.fc1") == 0.0
-assert h3.resolve_weight(rules, "block", 15, "attn.out_proj") == 0.5
-assert h3.resolve_weight(rules, "refiner", 1, "attn.qkv_proj") == 0.0
-print("ok  widget spec, layer-isolated")
-
-# layers=all leaves the other sublayers alone
-rules = h3.parse_spec(h3.spec_from_widgets("all", [1.0, 0.5, 0.0, 0.0, 1.0], 0.25))
-assert h3.resolve_weight(rules, "block", 5, "mlp.fc1") == 1.0
-assert h3.resolve_weight(rules, "block", 15, "mlp.fc2") == 0.5
-assert h3.resolve_weight(rules, "refiner", 0, "attn.qkv_proj") == 0.25
-print("ok  widget spec, all layers")
-
-# the spec node validates and passes through
-spec_node = h3.H3LoraBlockSpec()
-assert spec_node.build("", "0-9: 0.5")[0] == "0-9: 0.5"
-assert spec_node.build("", "")[0] == ""
-try:
-    spec_node.build("", "0-9: nope")
-except ValueError as e:
-    print("ok  spec node rejects bad input ->", e)
-else:
-    failures.append("spec node should reject bad input")
-
 # --- the grid compiler -----------------------------------------------------------
 import json as _json
 
@@ -128,9 +100,8 @@ assert h3.resolve_weight(rules, "block", 5, "attn.qkv_proj") == 1.0
 assert h3.resolve_weight(rules, "block", 20, "mlp.fc1") == 1.0
 print("ok  grid output parses and resolves")
 
-# text overrides the grid, because it is appended after
-combined = spec_node.build(grid(qkv=[0] * 50), "0-9.qkv: 1.0")[0]
-rules = h3.parse_spec(combined)
+# text overrides the grid, because build_spec appends it after
+rules = h3.parse_spec(h3.build_spec(1.0, grid(qkv=[0] * 50), "0-9.qkv: 1.0"))
 assert h3.resolve_weight(rules, "block", 5, "attn.qkv_proj") == 1.0
 assert h3.resolve_weight(rules, "block", 30, "attn.qkv_proj") == 0.0
 print("ok  text box overrides the grid")
