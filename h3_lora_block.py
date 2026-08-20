@@ -207,7 +207,8 @@ class H3LoraBlockLoader:
                                        "tooltip": "Global multiplier applied on top of every cell in the grid."}),
                 "brush": ("FLOAT", {"default": 0.0, "min": -2.0, "max": 2.0, "step": 0.05,
                                     "tooltip": "What painting a cell sets it to. Clicking toggles between "
-                                               "1.0 and this value, so 0 mutes and 0.5 halves."}),
+                                               "1.0 and this value, so 0 mutes and 0.5 halves. "
+                                               "Left at 1.0 it mutes, since toggling 1 against 1 would do nothing."}),
                 "token_refiner": ("FLOAT", {"default": 1.0, "min": -2.0, "max": 2.0, "step": 0.05,
                                             "tooltip": "Strength for the 2 text-side refiner blocks, which the "
                                                        "grid does not cover. Set to 0 first when a LoRA won't "

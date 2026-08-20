@@ -141,7 +141,10 @@ function addGridWidget(node, stateWidget) {
 
         brush() {
             const w = node.widgets && node.widgets.find((x) => x.name === "brush");
-            return num(w ? w.value : 0, 0);
+            const v = num(w ? w.value : 0, 0);
+            // 1.0 would toggle against itself and leave the control dead, so a
+            // brush of 1 means "mute" -- the thing you almost always want first
+            return v === 1 ? 0 : v;
         },
 
         // a cell's applied weight: the most restrictive of the three controls,
@@ -185,6 +188,8 @@ function addGridWidget(node, stateWidget) {
             ctx.textAlign = "left";
             ctx.fillText("reset", PAD, y + TICK_H * 0.5);
             ctx.fillStyle = COL_TEXT;
+            ctx.textAlign = "right";
+            ctx.fillText("mult", gridX - 4, y + TICK_H * 0.5);
             ctx.textAlign = "center";
             for (let k = 0; k < N_BUCKETS; k++) {
                 const lo = k * BUCKET_SIZE;
@@ -196,7 +201,7 @@ function addGridWidget(node, stateWidget) {
             const barTop = y + TICK_H;
             ctx.textAlign = "left";
             ctx.fillStyle = COL_TEXT;
-            ctx.fillText("blocks", PAD, barTop + BUCKET_H * 0.5);
+            ctx.fillText("mult", PAD, barTop + BUCKET_H * 0.5);
             for (let k = 0; k < N_BUCKETS; k++) {
                 const v = num(this.state.buckets[k]);
                 const x = gridX + k * cellW;

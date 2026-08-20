@@ -16,12 +16,13 @@ model ●                                        ● model
   brush                                   0.00
   token_refiner                           1.00
 
-reset     0-9   10-19  20-29  30-39  40-49
-blocks  [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
- qkv  1 [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
- out  1 [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
- fc1 0.5[ 0.5 ][ 0.5 ][ 0.5 ][ 0.5 ][  0  ]
- fc2  1 [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
+reset   mult   0-9   10-19  20-29  30-39  40-49
+mult         [  1  ][  1  ][ 0.5 ][  1  ][  0  ]   <- column multipliers
+qkv       1  [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
+out       1  [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
+fc1     0.5  [ 0.5 ][ 0.5 ][ 0.5 ][ 0.5 ][  0  ]
+fc2       1  [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
+          ^ row multipliers
 ● block_weights
 ```
 
@@ -30,15 +31,15 @@ Three controls, all painted with the same click:
 | control | what it covers |
 |---|---|
 | **cell** | one weight matrix across one bucket of ten blocks |
-| **row multiplier** (number beside `qkv`/`out`/`fc1`/`fc2`) | that matrix across all 50 blocks |
-| **bucket** (the `blocks` strip) | all four matrices across ten blocks |
+| **row multiplier** (the `mult` column) | that matrix across all 50 blocks |
+| **column multiplier** (the `mult` row) | all four matrices across ten blocks |
 
 Every cell shows its resolved weight, so the grid reads as a table of the numbers that
 will actually be applied.
 
 - **click a cell** to toggle between `1.0` and `brush`; **drag** along a row to paint several
-- **click a row's number** (beside `qkv`/`out`/`fc1`/`fc2`) to type an exact value
-- **click a bucket** in the `blocks` strip to type an exact value for those ten blocks
+- **click a row multiplier** in the `mult` column to type an exact value
+- **click a column multiplier** in the `mult` row to type an exact value for those ten blocks
 - **click `reset`** to put everything back to `1.0`
 
 Cells are painted, because you flip a lot of them. The row and bucket numbers are typed,
@@ -51,7 +52,8 @@ restrictive wins**. So `fc1` at `0.5` crossing a bucket at `0.5` stays `0.5`, no
 a resolved weight is always a number you actually typed. A lone value above `1.0` survives
 for the same reason: nothing else is competing with it.
 
-`brush` is what painting sets things to — `0` to mute, `0.5` to halve. Cells shade by
+`brush` is what painting sets things to — `0` to mute, `0.5` to halve. Left at `1.0` it
+mutes, since toggling `1` against `1` would leave the click doing nothing. Cells shade by
 resolved weight: solid blue at `1.0`, dimmed for partial, grey at `0`, orange above `1.0`,
 red when negative.
 
