@@ -66,10 +66,14 @@ print("ok  override ordering")
 import json as _json
 
 
-def grid(**rows):
+def grid(rows_mult=None, buckets=None, **rows):
     state = {r: [1] * 50 for r in h3.GRID_ROWS}
     for name, values in rows.items():
         state[name] = values
+    state["rows"] = {r: 1 for r in h3.GRID_ROWS}
+    if rows_mult:
+        state["rows"].update(rows_mult)
+    state["buckets"] = list(buckets) if buckets else [1] * h3.NUM_BUCKETS
     return _json.dumps(state)
 
 
@@ -92,6 +96,46 @@ check_grid("two runs in one row",
 check_grid("fractional values survive", grid(qkv=[0.5] * 50), "0-49.qkv: 0.5")
 check_grid("multiple rows keep row order",
            grid(qkv=[0] * 50, fc1=[0] * 50), "0-49.qkv: 0\n0-49.fc1: 0")
+
+# --- row and bucket multipliers, combined by "most restrictive wins" ------------
+check_grid("row multiplier halves a row",
+           grid(rows_mult={"fc1": 0.5}), "0-49.fc1: 0.5")
+check_grid("bucket multiplier halves ten blocks",
+           grid(buckets=[0.5, 1, 1, 1, 1]),
+           "0-9.qkv: 0.5" + chr(10) + "0-9.out: 0.5" + chr(10) + "0-9.fc1: 0.5" + chr(10) + "0-9.fc2: 0.5")
+# the bucket covers all four rows in blocks 0-9; the point is that fc1 stays a
+# flat 0.5 across 0-49 instead of dipping to 0.25 where the two overlap
+check_grid("equal row and bucket do not compound",
+           grid(rows_mult={"fc1": 0.5}, buckets=[0.5, 1, 1, 1, 1]),
+           "0-9.qkv: 0.5" + chr(10) + "0-9.out: 0.5" + chr(10) + "0-49.fc1: 0.5"
+           + chr(10) + "0-9.fc2: 0.5")
+check_grid("the lower of row and bucket wins",
+           grid(rows_mult={"fc1": 0.5}, buckets=[0.2, 1, 1, 1, 1]),
+           "0-9.qkv: 0.2" + chr(10) + "0-9.out: 0.2" + chr(10) + "0-9.fc1: 0.2"
+           + chr(10) + "10-49.fc1: 0.5" + chr(10) + "0-9.fc2: 0.2")
+check_grid("a muted cell beats a softer row",
+           grid(rows_mult={"out": 0.5}, out=[0] + [1] * 49),
+           "0.out: 0" + chr(10) + "1-49.out: 0.5")
+check_grid("a zero row beats a boosted bucket",
+           grid(rows_mult={"qkv": 0.0}, buckets=[2] * 5),
+           "0-49.qkv: 0" + chr(10) + "0-49.out: 2" + chr(10) + "0-49.fc1: 2" + chr(10) + "0-49.fc2: 2")
+check_grid("multipliers of 1 emit nothing", grid(rows_mult={"fc2": 1.0}), "")
+check_grid("a lone boost survives", grid(rows_mult={"qkv": 1.5}), "0-49.qkv: 1.5")
+check_grid("missing rows/buckets keys tolerated",
+           _json.dumps({r: [1] * 50 for r in h3.GRID_ROWS}), "")
+check_grid("garbage multipliers fall back to 1",
+           grid(rows_mult={"fc1": "nope"}, buckets=["x"] * 5), "")
+
+# resolved weights are always a number the user actually set -- no products
+_w = h3.grid_weights(grid(rows_mult={"fc1": 0.3}, buckets=[0.7] * 5))
+assert set(_w["fc1"]) == {0.3}, sorted(set(_w["fc1"]))
+print("ok  resolved weights stay values the user chose")
+
+assert h3.combine(1.0, 1.0, 1.0) == 1.0
+assert h3.combine(0.5, 1.0, 0.5) == 0.5
+assert h3.combine(1.5, 1.0, 1.0) == 1.5
+assert h3.combine(1.5, 0.5, 1.0) == 0.5
+print("ok  combine() takes the most restrictive opinion")
 
 # grid output must be parseable and resolve as expected
 rules = h3.parse_spec(h3.spec_from_grid(grid(fc1=[0] * 10 + [1] * 40, fc2=[0] * 10 + [1] * 40)))

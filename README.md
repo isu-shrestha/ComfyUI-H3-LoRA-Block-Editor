@@ -9,42 +9,53 @@ conflict usually fixes it without giving up the parts you want.
 One node, `H3 LoRA Block Loader` (`loaders/h3`):
 
 ```
-model ●                                    ● model
-                                           ● report
-  lora_name          my_h3_lora.safetensors
-  strength                            1.00
-  brush                               0.00
-  token_refiner                       1.00
+model ●                                        ● model
+                                               ● report
+  lora_name              my_h3_lora.safetensors
+  strength                                1.00
+  brush                                   0.00
+  token_refiner                           1.00
 
-        0    10    20    30    40   49
- all
- qkv  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░
- out  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░
- fc1  ░░░░░░░░░░▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
- fc2  ░░░░░░░░░░▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+reset      0     10    20    30    40    49
+blocks [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
+ qkv  1  ▓▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒▒▓▓▓▓▓▓░░░░░░
+ out  1  ▓▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒▒▓▓▓▓▓▓░░░░░░
+ fc1 0.5 ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒░░░░░░
+ fc2  1  ▓▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒▒▓▓▓▓▓▓░░░░░░
 ● block_weights
 ```
 
-The grid is the whole interface. Four rows are the weight matrices the LoRA patches
-inside every block; fifty columns are the blocks.
+Three controls, all painted with the same click:
 
-- **click a cell** to toggle between `1.0` and `brush`
-- **drag across cells** to paint a range — the first cell decides the direction
-- **click a row label** (`qkv`, `out`, `fc1`, `fc2`) to flip that whole row
-- **click `all`** to flip everything
+| control | what it covers |
+|---|---|
+| **cell** | one weight matrix in one block |
+| **row multiplier** (number beside `qkv`/`out`/`fc1`/`fc2`) | that matrix across all 50 blocks |
+| **bucket** (the `blocks` strip) | all four matrices across ten blocks |
 
-`brush` is what painting sets a cell to. Leave it at `0` to mute, or set `0.5` to halve.
-Cells render solid blue at `1.0`, dimmed for partial values, grey at `0`, orange above
-`1.0` and red when negative.
+- **click a cell** to toggle between `1.0` and `brush`; **drag** to paint a range
+- **click a row's number** to flip that row's multiplier
+- **click a bucket** to flip ten blocks at once; **drag** across buckets
+- **click `reset`** to put everything back to `1.0`
 
-`strength` multiplies every cell, so you can sweep the whole LoRA without repainting.
+### They do not compound
+
+`1.0` means "no opinion". Among the controls that do have an opinion, **the most
+restrictive wins**. So `fc1` at `0.5` crossing a bucket at `0.5` stays `0.5`, not `0.25` —
+a resolved weight is always a number you actually typed. A lone value above `1.0` survives
+for the same reason: nothing else is competing with it.
+
+`brush` is what painting sets things to — `0` to mute, `0.5` to halve. Cells are drawn at
+their *resolved* weight: solid blue at `1.0`, dimmed for partial, grey at `0`, orange above
+`1.0`, red when negative.
+
+`strength` scales everything, so you can sweep the whole LoRA without repainting.
 
 `token_refiner` covers the 2 text-side refiner blocks, which the grid does **not** include
 — the grid is the 50 main blocks only.
 
 `block_weights` is an optional socket for a text spec, applied after the grid so it
-overrides. You only need it for things the grid cannot say, such as targeting one refiner
-block (`refiner.0.attn: 0.5`). Wire any node that outputs a `STRING`.
+overrides. Only needed for what the grid cannot say, like `refiner.0.attn: 0.5`.
 
 ## What H3 loras actually contain
 
@@ -91,9 +102,9 @@ All of these are on the one node. Try them in order:
 | try | how |
 |---|---|
 | stop competing over prompt conditioning | `token_refiner` → `0` |
-| attention only (MLPs carry most memorized content) | click the `fc1` and `fc2` row labels |
-| drop early blocks (coarse motion / layout) | drag across columns 0-9, all four rows |
-| drop late blocks (fine texture / detail) | drag across columns 40-49 |
+| attention only (MLPs carry most memorized content) | set the `fc1` and `fc2` row multipliers to `0` |
+| drop early blocks (coarse motion / layout) | set the first `blocks` bucket to `0` |
+| drop late blocks (fine texture / detail) | set the last `blocks` bucket to `0` |
 | back the whole thing off, as a control | `strength` → `0.6` |
 
 `token_refiner` → `0` is the cheapest first test: it's only 8 of 208 tensors, so you keep

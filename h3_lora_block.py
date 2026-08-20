@@ -44,6 +44,8 @@ KEY_RE = re.compile(r"^diffusion_model\.(token_refiner\.)?blocks\.(\d+)\.(.+)\.w
 
 GRID_ROWS = ("qkv", "out", "fc1", "fc2")
 NUM_BLOCKS = 50
+BUCKET_SIZE = 10
+NUM_BUCKETS = NUM_BLOCKS // BUCKET_SIZE
 
 
 def parse_model_key(key):
@@ -281,36 +283,75 @@ class H3LoraBlockLoader:
         return (patched, report)
 
 
-def spec_from_grid(grid_state):
-    """Compile the grid widget's JSON state into spec lines.
+def _number(value, default=1.0):
+    return float(value) if isinstance(value, (int, float)) else default
 
-    State is {"qkv": [50 floats], "out": [...], "fc1": [...], "fc2": [...]}.
-    Only values that differ from 1.0 emit a rule, and runs of equal values
-    collapse into ranges, so an untouched grid produces nothing at all.
+
+def combine(*factors):
+    """The most restrictive setting wins.
+
+    1.0 means "no opinion", so it never constrains anything. Among the factors
+    that do express an opinion the lowest wins, which keeps a resolved weight
+    equal to a number the user actually typed: fc1 at 0.5 crossing a bucket at
+    0.5 stays 0.5 rather than compounding to 0.25. With nothing set anywhere the
+    result is 1.0, and a lone boost above 1.0 survives because it is the only
+    opinion on offer.
+    """
+    opinions = [f for f in factors if f != 1.0]
+    return min(opinions) if opinions else 1.0
+
+
+def grid_weights(grid_state):
+    """Resolve the grid's three controls into {row: [50 weights]}.
+
+    State is {"qkv": [50 cells], "out": [...], "fc1": [...], "fc2": [...],
+              "rows": {row: multiplier}, "buckets": [5 multipliers]}.
+    Each bucket covers ten blocks, matching the grid's tick marks.
     """
     if not grid_state or not grid_state.strip():
-        return ""
+        return {}
     try:
         data = json.loads(grid_state)
     except ValueError:
-        logging.warning("H3 LoRA Block Spec: grid state is not valid JSON, ignoring it")
-        return ""
+        logging.warning("H3 LoRA Block Loader: grid state is not valid JSON, ignoring it")
+        return {}
     if not isinstance(data, dict):
-        return ""
+        return {}
 
-    lines = []
+    row_mults = data.get("rows") if isinstance(data.get("rows"), dict) else {}
+    buckets = data.get("buckets") if isinstance(data.get("buckets"), list) else []
+
+    resolved = {}
     for row in GRID_ROWS:
-        values = data.get(row)
-        if not isinstance(values, list) or not values:
+        cells = data.get(row)
+        if not isinstance(cells, list) or not cells:
             continue
+        row_mult = _number(row_mults.get(row))
+        weights = []
+        for index, cell in enumerate(cells):
+            bucket = index // BUCKET_SIZE
+            bucket_mult = _number(buckets[bucket]) if bucket < len(buckets) else 1.0
+            weights.append(combine(_number(cell), row_mult, bucket_mult))
+        resolved[row] = weights
+    return resolved
+
+
+def spec_from_grid(grid_state):
+    """Compile the grid's resolved weights into spec lines.
+
+    Only weights that differ from 1.0 emit a rule, and runs of equal weights
+    collapse into ranges, so an untouched grid produces nothing at all.
+    """
+    lines = []
+    for row, weights in grid_weights(grid_state).items():
         start = 0
-        for i in range(1, len(values) + 1):
-            if i == len(values) or values[i] != values[start]:
-                value = values[start]
-                if isinstance(value, (int, float)) and value != 1.0:
+        for i in range(1, len(weights) + 1):
+            if i == len(weights) or weights[i] != weights[start]:
+                weight = weights[start]
+                if weight != 1.0:
                     lo, hi = start, i - 1
                     label = str(lo) if lo == hi else "{}-{}".format(lo, hi)
-                    lines.append("{}.{}: {:.4g}".format(label, row, value))
+                    lines.append("{}.{}: {:.4g}".format(label, row, weight))
                 start = i
     return "\n".join(lines)
 
