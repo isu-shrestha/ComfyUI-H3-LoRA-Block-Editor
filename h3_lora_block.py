@@ -205,6 +205,9 @@ class H3LoraBlockLoader:
                 "lora_name": (folder_paths.get_filename_list("loras"), {"tooltip": "The LoRA to apply."}),
                 "strength": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step": 0.01,
                                        "tooltip": "Global multiplier applied on top of every resolved cell weight."}),
+                "brush": ("FLOAT", {"default": 0.0, "min": -2.0, "max": 2.0, "step": 0.05,
+                                    "tooltip": "The weight a cell takes when you click it. "
+                                               "Set 0 to mute, 0.5 to halve, 1 to switch back on."}),
                 "token_refiner": ("FLOAT", {"default": 1.0, "min": -2.0, "max": 2.0, "step": 0.05,
                                             "tooltip": "Strength for the 2 text-side refiner blocks, which the "
                                                        "grid does not cover. Set to 0 first when a LoRA won't "
@@ -231,7 +234,8 @@ class H3LoraBlockLoader:
                    "entirely, which is the usual fix when a LoRA refuses to share a stack with "
                    "another one.")
 
-    def apply(self, model, lora_name, strength, token_refiner, grid="", block_weights=""):
+    def apply(self, model, lora_name, strength, brush, token_refiner, grid="", block_weights=""):
+        del brush  # the grid widget reads it in the frontend; nothing to do here
         rules = parse_spec(build_spec(token_refiner, grid, block_weights))
 
         lora_path = folder_paths.get_full_path_or_raise("loras", lora_name)

@@ -13,45 +13,26 @@ model ●                                        ● model
                                                ● report
   lora_name              my_h3_lora.safetensors
   strength                                1.00
+  brush                                   0.00
   token_refiner                           1.00
 
-reset   mult   0-9   10-19  20-29  30-39  40-49
-mult         [  1  ][  1  ][ 0.5 ][  1  ][  0  ]   <- column weights
-qkv       1  [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
-out       1  [  1  ][  1  ][ 0.5 ][  0  ][  0  ]
-fc1     0.5  [ 0.5 ][ 0.5 ][ 0.5 ][ 0.5 ][  0  ]
-fc2       1  [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
-          ^ row weights
+reset    0-9   10-19  20-29  30-39  40-49
+qkv    [  1  ][  1  ][  1  ][  1  ][  0  ]
+out    [  1  ][  1  ][ 0.5 ][ 0.5 ][  0  ]
+fc1    [  1  ][  1  ][ 0.5 ][  1  ][  0  ]
+fc2    [  1  ][  1  ][  1  ][  1  ][  0  ]
 ● block_weights
 ```
 
-The weights live on the axes; the cells are on/off:
+Four rows are the weight matrices the LoRA patches inside every block; five columns are
+buckets of ten blocks.
 
-| control | what it does |
-|---|---|
-| **row weight** (the `mult` column) | sets that weight matrix across all 50 blocks |
-| **column weight** (the `mult` row) | sets all four matrices across ten blocks |
-| **cell** | switches one matrix on or off for one bucket of ten blocks |
-
-- **click a row or column weight** to type a value
-- **click a cell** to toggle it on or off; **drag** along a row to flip several
+- **set `brush`** to the weight you want — `0` to mute, `0.5` to halve, `1` to switch back on
+- **click a cell** to give it that weight; **drag** along a row to paint several
 - **click `reset`** to put everything back to `1.0`
 
-Every cell shows its resolved weight, so the grid reads as a table of the numbers that
-will actually be applied.
-
-### They do not compound
-
-`1.0` means "no opinion". Among the controls that do have an opinion, **the most
-restrictive wins**. So `fc1` at `0.5` crossing a bucket at `0.5` stays `0.5`, not `0.25` —
-a resolved weight is always a number you actually typed. A lone value above `1.0` survives
-for the same reason: nothing else is competing with it.
-
-Cells shade by resolved weight: solid blue at `1.0`, dimmed for partial, grey at `0`, orange above `1.0`,
-red when negative.
-
-Ten blocks per bucket is the granularity on offer. For anything finer, the `block_weights`
-socket still addresses individual blocks (`25.out: 0`), and it is applied after the grid.
+Each cell shows its weight, so the grid reads as a table of the numbers that will
+actually be applied.
 
 `strength` scales everything, so you can sweep the whole LoRA without repainting.
 
@@ -106,9 +87,9 @@ All of these are on the one node. Try them in order:
 | try | how |
 |---|---|
 | stop competing over prompt conditioning | `token_refiner` → `0` |
-| attention only (MLPs carry most memorized content) | set the `fc1` and `fc2` row weights to `0` |
-| drop early blocks (coarse motion / layout) | set the `0-9` column weight to `0` |
-| drop late blocks (fine texture / detail) | set the `40-49` column weight to `0` |
+| attention only (MLPs carry most memorized content) | `brush` `0`, then drag along the `fc1` and `fc2` rows |
+| drop early blocks (coarse motion / layout) | `brush` `0`, then click the `0-9` cell in each row |
+| drop late blocks (fine texture / detail) | `brush` `0`, then click the `40-49` cell in each row |
 | back the whole thing off, as a control | `strength` → `0.6` |
 
 `token_refiner` → `0` is the cheapest first test: it's only 8 of 208 tensors, so you keep
